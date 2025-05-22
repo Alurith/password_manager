@@ -5,22 +5,27 @@ from typing import Annotated, Literal, Optional, Union
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from pydantic import BaseModel
 
+# --- Creazione dell'app FastAPI ---
 app = FastAPI()
 
 
+# --- Definizione dei Data Transfer Object (DTO) con pydantic ---
 class CredentialDTO(BaseModel):
+    # DTO per ricevere username e password in input
     username: str
     password: str
 
 
 class KeyDTO(BaseModel):
+    # DTO per rappresentare una credenziale salvata, con metadati
     username: str
     password: str
-    created_at: str
-    updated_at: str
-    password_strength: Literal["weak", "strong"]
+    created_at: str  # timestamp di creazione
+    updated_at: str  # timestamp di ultimo aggiornamento
+    password_strength: Literal["weak", "strong"]  # forza della password
 
 
+# --- Interfaccia astratta per il repository della password manager ---
 class PasswordManagerRepository(ABC):
     @abstractmethod
     def get_categories(self, category: str, key: str) -> list[str]:
@@ -63,41 +68,48 @@ class PasswordManagerRepository(ABC):
         pass
 
 
-_category_map = {}
+# --- Implementazione in memoria del repository ---
+_category_map = {}  # struttura dati globale: { category: { key: KeyDTO, ... }, ... }
 
 
 class InMemoryStorage(PasswordManagerRepository):
+    # Metodo ausiliario per verificare esistenza di una chiave in una categoria
     def key_exist(self, category, key) -> bool:
         if not self.category_exist(category):
             return False
-        return True if key in _category_map[category] else False
+        return key in _category_map[category]
 
+    # Restituisce tutte le categorie esistenti
     def get_categories(self) -> list[str]:
         return list(_category_map.keys())
 
+    # Crea una nuova categoria se non esiste già
     def create_category(self, category) -> bool:
         if self.category_exist(category):
             return False
         _category_map[category] = {}
         return True
 
+    # Ottiene tutte le chiavi (nomi delle credenziali) di una categoria
     def get_category(self, category) -> Union[list[str], None]:
         if not self.category_exist(category):
             return None
         return list(_category_map[category].keys())
 
+    # Controlla se una categoria esiste
     def category_exist(self, category) -> bool:
-        return True if category in _category_map else False
+        return category in _category_map
 
+    # Elimina una categoria e tutte le sue credenziali
     def delete_category(self, category) -> bool:
         if not self.category_exist(category):
             return False
         _category_map.pop(category)
         return True
 
+    # Crea una nuova credenziale all’interno di una categoria
     def create_credential(self, category, key, username, password) -> None:
         now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
-
         _category_map[category][key] = KeyDTO(
             username=username,
             password=password,
@@ -106,27 +118,26 @@ class InMemoryStorage(PasswordManagerRepository):
             password_strength="weak" if len(password) < 13 else "strong",
         )
 
+    # Recupera una credenziale (o {} se non esiste)
     def get_credential(self, category, key) -> Union[KeyDTO, None]:
         if not self.key_exist(category, key):
             return {}
         return _category_map[category][key]
 
+    # Aggiorna username/password e metadata di una credenziale esistente
     def update_credential(self, category, key, username, password) -> bool:
         old_credential: KeyDTO = self.get_credential(category, key)
         if not old_credential:
             return False
-        else:
-            now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
-            old_credential.username = username
-            old_credential.password = password
-            old_credential.updated_at = now
-            old_credential.password_strength = (
-                "weak" if len(password) < 13 else "strong"
-            )
+        now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
+        old_credential.username = username
+        old_credential.password = password
+        old_credential.updated_at = now
+        old_credential.password_strength = "weak" if len(password) < 13 else "strong"
+        _category_map[category][key] = old_credential
+        return True
 
-            _category_map[category][key] = old_credential
-            return True
-
+    # Elimina una specifica credenziale da una categoria
     def delete_credential(self, category, key) -> bool:
         if not self.key_exist(category, key):
             return False
@@ -134,10 +145,12 @@ class InMemoryStorage(PasswordManagerRepository):
         return True
 
 
+# --- Definizione degli endpoint FastAPI ---
 @app.get("/")
 def get_categories(
     repo: Annotated[PasswordManagerRepository, Depends(InMemoryStorage)],
 ):
+    # GET /: restituisce la lista delle categorie
     return repo.get_categories()
 
 
@@ -150,6 +163,7 @@ def create_categories(
     repo: Annotated[PasswordManagerRepository, Depends(InMemoryStorage)],
     category_name: str,
 ):
+    # PUT /{category_name}: crea una nuova categoria
     if not repo.create_category(category_name):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -165,6 +179,7 @@ def get_category(
     repo: Annotated[PasswordManagerRepository, Depends(InMemoryStorage)],
     category_name: str,
 ):
+    # GET /{category_name}: restituisce tutte le chiavi di una categoria
     if not repo.category_exist(category_name):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return repo.get_category(category_name)
@@ -178,6 +193,7 @@ def delete_category(
     repo: Annotated[PasswordManagerRepository, Depends(InMemoryStorage)],
     category_name: str,
 ):
+    # DELETE /{category_name}: elimina la categoria
     if not repo.delete_category(category_name):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -193,11 +209,13 @@ def create_credentials(
     key: str,
     credential: CredentialDTO,
 ):
+    # PUT /{category_name}/{key}: crea o aggiorna una credenziale
     if not repo.category_exist(category_name):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Category Not Found"
         )
     if repo.key_exist(category_name, key):
+        # se esiste già la chiave, esegue l’update
         repo.update_credential(
             category=category_name,
             key=key,
@@ -205,6 +223,7 @@ def create_credentials(
             password=credential.password,
         )
     else:
+        # altrimenti crea una nuova credenziale
         repo.create_credential(
             category=category_name,
             key=key,
@@ -222,6 +241,7 @@ def delete_credenials(
     category_name: str,
     key: str,
 ):
+    # DELETE /{category_name}/{key}: elimina una credenziale
     if not repo.delete_credential(category_name, key):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -236,12 +256,15 @@ def get_credential(
     category_name: str,
     key: str,
 ) -> CredentialDTO:
+    # GET /{category_name}/{key}: recupera una credenziale e imposta header custom
     credential = repo.get_credential(category_name, key)
     if not credential:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
+    # Aggiunta di metadati negli header HTTP
     response.headers["X-PM-Created-At"] = credential.created_at
     response.headers["X-PM-Updated-At"] = credential.updated_at
     response.headers["X-PM-Password-Strength"] = credential.password_strength
 
+    # Restituisce solo username e password nel body
     return CredentialDTO(username=credential.username, password=credential.password)
