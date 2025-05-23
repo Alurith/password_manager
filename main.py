@@ -28,7 +28,7 @@ class KeyDTO(BaseModel):
 # --- Interfaccia astratta per il repository della password manager ---
 class PasswordManagerRepository(ABC):
     @abstractmethod
-    def get_categories(self, category: str, key: str) -> list[str]:
+    def get_categories(self) -> list[str]:
         pass
 
     @abstractmethod
@@ -67,14 +67,18 @@ class PasswordManagerRepository(ABC):
     def delete_credential(self, category: str, key: str) -> bool:
         pass
 
+    @abstractmethod
+    def key_exist(self, category: str, key: str) -> bool:
+        pass
+
 
 # --- Implementazione in memoria del repository ---
-_category_map = {}  # struttura dati globale: { category: { key: KeyDTO, ... }, ... }
+_category_map: dict = {}  # struttura dati globale: { category: { key: KeyDTO, ... }, ... }
 
 
 class InMemoryStorage(PasswordManagerRepository):
     # Metodo ausiliario per verificare esistenza di una chiave in una categoria
-    def key_exist(self, category, key) -> bool:
+    def key_exist(self, category: str, key: str) -> bool:
         if not self.category_exist(category):
             return False
         return key in _category_map[category]
@@ -84,7 +88,7 @@ class InMemoryStorage(PasswordManagerRepository):
         return list(_category_map.keys())
 
     # Crea una nuova categoria se non esiste già
-    def create_category(self, category) -> bool:
+    def create_category(self, category: str) -> bool:
         if self.category_exist(category):
             return False
         _category_map[category] = {}
@@ -121,12 +125,12 @@ class InMemoryStorage(PasswordManagerRepository):
     # Recupera una credenziale (o {} se non esiste)
     def get_credential(self, category, key) -> Union[KeyDTO, None]:
         if not self.key_exist(category, key):
-            return {}
+            return None
         return _category_map[category][key]
 
     # Aggiorna username/password e metadata di una credenziale esistente
     def update_credential(self, category, key, username, password) -> bool:
-        old_credential: KeyDTO = self.get_credential(category, key)
+        old_credential: Union[KeyDTO, None] = self.get_credential(category, key)
         if not old_credential:
             return False
         now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
