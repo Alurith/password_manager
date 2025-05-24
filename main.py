@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from pydantic import BaseModel
 
 # --- Creazione dell'app FastAPI ---
-app = FastAPI()
+app: FastAPI = FastAPI()
 
 
 # --- Definizione dei Data Transfer Object (DTO) con pydantic ---
@@ -113,7 +113,7 @@ class InMemoryStorage(PasswordManagerRepository):
 
     # Crea una nuova credenziale all’interno di una categoria
     def create_credential(self, category, key, username, password) -> None:
-        now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
+        now: str = get_datetime_now()
         _category_map[category][key] = KeyDTO(
             username=username,
             password=password,
@@ -133,10 +133,10 @@ class InMemoryStorage(PasswordManagerRepository):
         old_credential: Union[KeyDTO, None] = self.get_credential(category, key)
         if not old_credential:
             return False
-        now = datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
+
         old_credential.username = username
         old_credential.password = password
-        old_credential.updated_at = now
+        old_credential.updated_at = get_datetime_now()
         old_credential.password_strength = "weak" if len(password) < 13 else "strong"
         _category_map[category][key] = old_credential
         return True
@@ -147,6 +147,10 @@ class InMemoryStorage(PasswordManagerRepository):
             return False
         _category_map[category].pop(key)
         return True
+
+
+def get_datetime_now() -> str:
+    return datetime.now().strftime(format="%d/%m/%Y, %H:%M:%S")
 
 
 # --- Definizione degli endpoint FastAPI ---
